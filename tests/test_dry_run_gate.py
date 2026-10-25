@@ -398,6 +398,24 @@ class GuardTests(TempDirCase):
         with open(self.log) as fh:
             self.assertNotIn("secret", fh.read())
 
+    def test_fork_exec_audit_event_is_blocked(self):
+        # the event's arguments are (executable_list, argv, env) where Python raises it (D17)
+        self.assert_blocked(gate.FORK_EXEC, ([b"/usr/bin/python3"], [b"python3", "-c", "secret"], None), "python3")
+        self.assert_blocked(gate.FORK_EXEC, ([], ["/usr/bin/true"], None), "true")
+
+    def test_fork_exec_wrapper_blocks_multiprocessing_spawn_path(self):
+        import _posixsubprocess
+        import multiprocessing.util
+        original = gate.install_fork_exec_wrapper(self.guard)
+        self.addCleanup(setattr, _posixsubprocess, "fork_exec", original)
+        self.assertIsNot(_posixsubprocess.fork_exec, original)
+        with self.assertRaises(PermissionError):
+            multiprocessing.util.spawnv_passfds(os.fsencode(shutil.which("true") or "/usr/bin/true"),
+                                                [b"true", b"secret"], ())
+        blocked, _, error = self.events()
+        self.assertIsNone(error)
+        self.assertEqual(blocked, [{"kind": "blocked", "event": gate.FORK_EXEC, "detail": "true"}])
+
     def test_ctypes_dlopen_is_a_note_not_a_block(self):
         self.guard.hook("ctypes.dlopen", ("libc.so.6",))
         blocked, notes, error = self.events()
@@ -573,6 +591,14 @@ class CheckTests(TempDirCase):
         self.assertIn("RuntimeError: boom", out)
         self.assertIn("killed by signal 9", self.detail(report, "R1", "killed"))
         self.assertIn("in stderr (literal)", self.detail(report, "R1", "stderr-canary"))
+
+    def test_r1_blocks_fork_exec_reached_without_subprocess(self):
+        spawn = ("import multiprocessing.util\nimport shutil\n"
+                 + gate.swallow('multiprocessing.util.spawnv_passfds(os.fsencode(shutil.which("true")), [b"true"], ())'))
+        gate.st_path_skill(self.tmp, "spawnv", before=spawn)
+        report, out, _ = self.run_gate()
+        self.assertEqual(self.status(report, "R1"), gate.FAIL, out)
+        self.assertIn(f"{gate.FORK_EXEC} true", self.detail(report, "R1"))
 
     def test_r1_runs_with_args_cwd_and_import_path(self):
         meta = gate.ST_META + (("dry-run-args", "--n 'two words'"),)

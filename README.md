@@ -15,7 +15,7 @@ git clone <skill repo> /tmp/gate-check && cd /tmp/gate-check
 python3 ~/Developer/repos/sites/_incoming/dry-run-gate/dry_run_gate.py .
 ```
 
-`python3 dry_run_gate.py --list .` shows what the gate discovered without running anything. `python3 dry_run_gate.py --selftest` runs the 37 built-in cases.
+`python3 dry_run_gate.py --list .` shows what the gate discovered without running anything. `python3 dry_run_gate.py --selftest` runs the 38 built-in cases.
 
 ## Terms
 
@@ -141,10 +141,12 @@ Packages installed with `pip install --user` are not importable in the child. In
 | `socket.bind` | never blocked or logged; a socket bound to a loopback address is remembered |
 | `socket.connect`, `socket.sendto`, `socket.sendmsg` | allowed only to a loopback address whose port is that of a socket the child itself bound to loopback and still holds, so a local fake server works and a local proxy does not; otherwise blocked. `sendmsg` without an address is allowed (connected socket, already checked at connect). `AF_UNIX` is allowed |
 | `socket.getaddrinfo`, `socket.gethostbyname`, `socket.gethostbyaddr`, `socket.getnameinfo` | blocked unless the host is `localhost`, `127.0.0.1` or `::1` |
-| `subprocess.Popen`, `os.system`, `os.exec`, `os.posix_spawn`, `os.spawn`, `os.fork`, `os.forkpty` | always blocked |
+| `subprocess.Popen`, `os.system`, `os.exec`, `os.posix_spawn`, `os.spawn`, `os.fork`, `os.forkpty`, `_posixsubprocess.fork_exec` | always blocked |
 | `ctypes.dlopen` | never blocked; noted for C1 |
 
 All other events are ignored. Loopback means `127.0.0.0/8`, `::1` or `localhost`.
+
+`multiprocessing`'s spawn and forkserver start methods create processes through `_posixsubprocess.fork_exec` without going through `subprocess`, and Python 3.9 raises no audit event for that call. So besides hooking the `_posixsubprocess.fork_exec` event where Python raises it, the guard replaces `_posixsubprocess.fork_exec` with a wrapper that blocks it, on every version, before the target runs.
 
 The log holds one JSON object per line: `{"kind": "blocked" | "note", "event": ..., "detail": ...}`. `detail` is `host:port` for socket events, the hostname for DNS events, the executable's basename for process events (`os.system`: the first word of the command) and the library name for `ctypes.dlopen`. Arguments, environment, headers and body data are never written. A missing log, an unparseable line, a child killed by a signal, or a timeout is FAIL. If the guard cannot write its log, the child exits 70.
 
@@ -245,7 +247,6 @@ jobs:
 ## Stated limits
 
 - Audit hooks see Python-level calls only, so C code can bypass them outside netns. That includes CPython's own C code: a hostname passed straight to `socket.connect` is resolved before the `socket.connect` event fires, so the DNS lookup happens even though the connect is then blocked.
-- `multiprocessing`'s spawn start method creates its process through `_posixsubprocess.fork_exec`, which none of the hooked events covers (Python 3.9 raises no audit event for it; newer versions raise `_posixsubprocess.fork_exec`, which the guard does not hook). Under netns that process still has no network.
 - The gate targets careless dry-runs. A deliberately evasive target can defeat audit mode, for example by truncating its own log or calling libc through `ctypes`.
 - Entries must be Python.
 - The child keeps the user's file access by absolute path. It can read files such as credentials outside `HOME` lookups, and can write or delete anywhere the user can. Run the gate on a fresh clone (see Quick start).

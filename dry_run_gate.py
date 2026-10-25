@@ -713,7 +713,9 @@ def pytest_importable():
 
 HOOK_ADDRESS = ("socket.connect", "socket.sendto", "socket.sendmsg")
 HOOK_DNS = ("socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyaddr", "socket.getnameinfo")
-HOOK_PROCESS = ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork", "os.forkpty")
+FORK_EXEC = "_posixsubprocess.fork_exec"  # D17: multiprocessing spawn; no audit event on 3.9
+HOOK_PROCESS = ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork", "os.forkpty",
+                FORK_EXEC)
 HOOKED = frozenset(("socket.bind", "ctypes.dlopen") + HOOK_ADDRESS + HOOK_DNS + HOOK_PROCESS)
 DNS_ALLOWED = frozenset(("localhost", "127.0.0.1", "::1"))
 LOOPBACK_V4 = ipaddress.ip_network("127.0.0.0/8")
@@ -754,6 +756,8 @@ def process_name(event, args):
             executable = args[1]
         elif event in ("os.exec", "os.posix_spawn"):
             executable = args[0]
+        elif event == FORK_EXEC:  # (executable_list, argv, env)
+            executable = (list(args[0] or ()) or list(args[1] or ()) or [""])[0]
         else:
             return ""  # os.fork and os.forkpty take no arguments
         if isinstance(executable, os.PathLike):
@@ -834,10 +838,30 @@ class Guard:
             detail = self.blocked_detail(event, args)
         except Exception:
             detail = "unreadable arguments"
-        if detail is None:
-            return
+        if detail is not None:
+            self.block(event, detail)
+
+    def block(self, event, detail):
         self.write("blocked", event, detail)
         raise PermissionError(f"dry-run-gate blocked {event} {detail}".rstrip())
+
+
+def install_fork_exec_wrapper(guard):
+    """D17: block _posixsubprocess.fork_exec on every version, since multiprocessing's spawn start
+    method reaches it without an audit event on 3.9. Returns the original, or None without the module."""
+    try:
+        import _posixsubprocess
+    except ImportError:
+        return None
+    original = _posixsubprocess.fork_exec
+
+    def fork_exec(*args, **kwargs):
+        # positional order is (argv, executable_list, ...); process_name takes the event's order
+        executable_list = args[1] if len(args) > 1 else None
+        guard.block(FORK_EXEC, process_name(FORK_EXEC, (executable_list, args[0] if args else None)))
+
+    _posixsubprocess.fork_exec = fork_exec
+    return original
 
 
 def loopback_up():
@@ -875,6 +899,7 @@ def guard_main(argv):
     else:
         sys.path.insert(0, skill_dir)
     sys.addaudithook(guard.hook)
+    install_fork_exec_wrapper(guard)
     if target[0] == "-m":
         sys.argv = target[1:]
         runpy.run_module(target[1], run_name="__main__", alter_sys=True)
@@ -1412,6 +1437,37 @@ def _st37(tmp):
     st_expect(st_gate(tmp), 1, [("S1", FAIL, ".py"), ("R1", SKIP), ("R2", SKIP)])
 
 
+ST_SPAWN_ENTRY = f'''import multiprocessing
+import sys
+
+
+def work():
+    pass
+
+
+def main(argv):
+    if "--dry-run" not in argv:
+        return 2
+    try:
+        worker = multiprocessing.get_context("spawn").Process(target=work)
+        worker.start()
+        worker.join(10)
+    except Exception:
+        pass
+    print({ST_BANNER!r})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+'''
+
+
+def _st38(tmp):
+    st_path_skill(tmp, "mp-spawn", files={"scripts/send.py": ST_SPAWN_ENTRY})
+    st_expect(st_gate(tmp), 1, [("R1", FAIL, FORK_EXEC)])
+
+
 SELFTEST_CASES = [
     (1, "untagged, no Python files", _st01),
     (2, "untagged, a .py with a syntax error", _st02),
@@ -1450,6 +1506,7 @@ SELFTEST_CASES = [
     (35, "a PATH with no SKILL.md at either discovery pattern", _st35),
     (36, "dry-run-test is tests/test_dry_run.py with tests/__init__.py", _st36),
     (37, 'tagged, dry-run: "scripts/send.sh"', _st37),
+    (38, "dry-run starts a multiprocessing spawn process and swallows any exception", _st38),
 ]
 
 

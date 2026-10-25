@@ -280,6 +280,9 @@ class CanaryTests(unittest.TestCase):
         token = base64.b64encode(("u:" + self.CANARY).encode()).decode()
         self.assertEqual(self.find(f"BasicX{token}"), [("KEY", "base64")])
         self.assertEqual(self.find(f"auth={token}&x=1"), [("KEY", "base64")])
+        # an "=" at the 4th position of a quantum stops a lenient decode at every offset;
+        # only decoding the piece after the "=" finds the canary
+        self.assertEqual(self.find(f"xyz=w{token}"), [("KEY", "base64")])
 
     def test_every_offset_of_the_canary(self):
         for prefix in ("", "a", "ab", "abc"):
@@ -580,6 +583,7 @@ class CheckTests(TempDirCase):
                   "assert os.getcwd() == os.path.realpath(os.path.dirname(os.path.dirname(__file__)))\n"
                   f"assert set(os.environ) <= set({sorted(allowed)!r}), sorted(os.environ)\n"
                   "assert os.path.dirname(os.environ['HOME']) == os.path.dirname(os.environ['TMPDIR'])\n"
+                  "assert os.environ['HOME'] != os.environ['TMPDIR']\n"
                   "assert not os.listdir(os.environ['HOME'])\n"
                   "assert os.environ['PYTHONNOUSERSITE'] == os.environ['PYTHONDONTWRITEBYTECODE'] == '1'\n"
                   f"assert os.environ['{gate.ST_SECRET}'].startswith('dryrungate-canary-')")

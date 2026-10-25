@@ -263,10 +263,11 @@ def discover(paths):
 # ---------------------------------------------------------------- static checks
 
 class Check:
-    __slots__ = ("id", "status", "detail", "output")
+    __slots__ = ("id", "status", "detail", "output", "run")
 
-    def __init__(self, cid, status, detail="", output=None):
+    def __init__(self, cid, status, detail="", output=None, run=None):
         self.id, self.status, self.detail, self.output = cid, status, detail, output or []
+        self.run = run  # the RunResult behind R1/R2, for tests; not part of the report
 
     def as_json(self):
         return {"id": self.id, "status": self.status, "detail": self.detail}
@@ -553,7 +554,7 @@ def run_guarded(skill, target, opts, state):
         os.mkdir(home)
         os.mkdir(tmpdir)
         logfile = os.path.join(tmp, "guard.log")
-        cmd = [sys.executable, GATE_PATH, "--_guard", logfile, "--"] + target
+        cmd = [sys.executable, "-I", GATE_PATH, "--_guard", logfile, "--"] + target  # -I: D18
         if opts.isolation == "netns":
             with open(os.path.join(tmp, NETNS_MARKER), "w"):
                 pass
@@ -625,9 +626,9 @@ def judge_run(cid, run, opts, needs_banner):
     output = [f"stdout | {line}" for line in _output_lines(run.stdout)]
     if reasons:
         output += [f"stderr | {line}" for line in _output_lines(run.stderr)]
-        return Check(cid, FAIL, "; ".join(reasons), output)
+        return Check(cid, FAIL, "; ".join(reasons), output, run)
     banner = ", DRY RUN shown" if needs_banner else ""
-    return Check(cid, PASS, f"exit 0, no guard events{banner}, no canary", output if needs_banner else [])
+    return Check(cid, PASS, f"exit 0, no guard events{banner}, no canary", output if needs_banner else [], run)
 
 
 def check_path_entry(skill, opts, state):
@@ -893,13 +894,12 @@ def guard_main(argv):
     guard = Guard(logfile)
     if os.path.exists(os.path.join(os.path.dirname(logfile), NETNS_MARKER)):
         guard.write("note", "loopback", "up" if loopback_up() else "down")
-    skill_dir = os.getcwd()
-    if sys.path and os.path.realpath(sys.path[0] or ".") == os.path.dirname(os.path.realpath(GATE_PATH)):
-        sys.path[0] = skill_dir
-    else:
-        sys.path.insert(0, skill_dir)
+    # D18: the child runs under -I, so nothing from the skill was importable while the interpreter
+    # and this module started up; the skill's import path goes in only once the guard is in place.
+    sys.dont_write_bytecode = True
     sys.addaudithook(guard.hook)
     install_fork_exec_wrapper(guard)
+    sys.path[0:0] = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
     if target[0] == "-m":
         sys.argv = target[1:]
         runpy.run_module(target[1], run_name="__main__", alter_sys=True)
@@ -1468,6 +1468,26 @@ def _st38(tmp):
     st_expect(st_gate(tmp), 1, [("R1", FAIL, FORK_EXEC)])
 
 
+ST_SHADOW = 'import sys\nsys.stderr.write("SHADOW: a skill file ran in place of the stdlib module\\n")\n'
+
+
+def st_no_shadow(tmp, name, rel):
+    """D18: a skill file named like a module the interpreter or the gate imports at startup never runs."""
+    st_path_skill(tmp, name, files={rel: ST_SHADOW})
+    report = st_expect(st_gate(tmp), 0, [("R1", PASS), ("R2", PASS)])
+    for check in report.results[0][1]:
+        if check.id in ("R1", "R2") and b"SHADOW" in check.run.stdout + check.run.stderr:
+            raise AssertionError(f"{rel} ran in the {check.id} child")
+
+
+def _st39(tmp):
+    st_no_shadow(tmp, "secrets-shadow", "scripts/secrets.py")
+
+
+def _st40(tmp):
+    st_no_shadow(tmp, "site-shadow", "site.py")
+
+
 SELFTEST_CASES = [
     (1, "untagged, no Python files", _st01),
     (2, "untagged, a .py with a syntax error", _st02),
@@ -1507,6 +1527,8 @@ SELFTEST_CASES = [
     (36, "dry-run-test is tests/test_dry_run.py with tests/__init__.py", _st36),
     (37, 'tagged, dry-run: "scripts/send.sh"', _st37),
     (38, "dry-run starts a multiprocessing spawn process and swallows any exception", _st38),
+    (39, "scripts/secrets.py shadows a stdlib module the gate imports; it never runs", _st39),
+    (40, "a site.py in the skill dir shadows the interpreter's site; it never runs", _st40),
 ]
 
 

@@ -600,6 +600,28 @@ class CheckTests(TempDirCase):
         self.assertEqual(self.status(report, "R1"), gate.FAIL, out)
         self.assertIn(f"{gate.FORK_EXEC} true", self.detail(report, "R1"))
 
+    def test_child_is_isolated_and_writes_no_bytecode(self):
+        # D18: python -I, sys.dont_write_bytecode, PYTHONPATH entries first and in order
+        checks = ("import sys\n"
+                  "assert sys.flags.isolated == 1, sys.flags\n"
+                  "assert sys.dont_write_bytecode is True\n"
+                  "entries = os.environ['PYTHONPATH'].split(os.pathsep)\n"
+                  "assert sys.path[:len(entries)] == entries, sys.path\n"
+                  "assert not any(os.path.isfile(os.path.join(p or '.', 'dry_run_gate.py')) for p in sys.path), sys.path\n")
+        test = ("import os\nimport sys\nimport unittest\n\nimport tests.helper_module\n\n\n"
+                "class T(unittest.TestCase):\n    def test(self):\n"
+                + "".join(f"        {line}\n" for line in checks.splitlines())
+                + "        self.assertTrue('--dry-run')\n")
+        meta = gate.ST_META[:2] + (("dry-run-test", "tests/test_dry_run.py"),) + gate.ST_META[3:]
+        skill_dir = gate.st_path_skill(self.tmp, "isolated", before="import helper\n" + checks, meta=meta, files={
+            "scripts/helper.py": "", "tests/__init__.py": "", "tests/helper_module.py": "",
+            "tests/test_dry_run.py": test})
+        report, out, _ = self.run_gate()
+        self.assertEqual(self.status(report, "R1"), gate.PASS, out)
+        self.assertEqual(self.status(report, "R2"), gate.PASS, out)
+        caches = [os.path.join(d, n) for d, dirs, _ in os.walk(skill_dir) for n in dirs if n == "__pycache__"]
+        self.assertEqual(caches, [])
+
     def test_r1_runs_with_args_cwd_and_import_path(self):
         meta = gate.ST_META + (("dry-run-args", "--n 'two words'"),)
         allowed = set(gate.CHILD_ENV_COPIED + gate.CHILD_ENV_SET + (gate.ST_SECRET,))

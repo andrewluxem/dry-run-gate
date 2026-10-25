@@ -15,7 +15,7 @@ git clone <skill repo> /tmp/gate-check && cd /tmp/gate-check
 python3 ~/Developer/repos/sites/_incoming/dry-run-gate/dry_run_gate.py .
 ```
 
-`python3 dry_run_gate.py --list .` shows what the gate discovered without running anything. `python3 dry_run_gate.py --selftest` runs the 38 built-in cases.
+`python3 dry_run_gate.py --list .` shows what the gate discovered without running anything. `python3 dry_run_gate.py --selftest` runs the 40 built-in cases.
 
 ## Terms
 
@@ -126,13 +126,13 @@ The R1 stdout is printed under the check, so a human reading the CI log sees the
 
 ## The guard
 
-R1 and R2 start a child: `python dry_run_gate.py --_guard LOGFILE -- <target>`, with the skill dir as cwd. Under netns the command is prefixed with `unshare -rn`. LOGFILE is `guard.log` in a fresh temp dir that also holds the child's empty `HOME` and `TMPDIR`; the gate removes the temp dir after reading the log. On timeout (default 30 s per child) the gate kills the child's whole process group.
+R1 and R2 start a child: `python -I dry_run_gate.py --_guard LOGFILE -- <target>`, with the skill dir as cwd. Under netns the command is prefixed with `unshare -rn`. LOGFILE is `guard.log` in a fresh temp dir that also holds the child's empty `HOME` and `TMPDIR`; the gate removes the temp dir after reading the log. On timeout (default 30 s per child) the gate kills the child's whole process group.
 
-**Environment.** The child environment is built from scratch, not inherited. It holds only `PATH`, `LANG`, `LC_ALL` and `LC_CTYPE` copied from the parent when set; `HOME` and `TMPDIR` inside the per-run temp dir; `PYTHONDONTWRITEBYTECODE=1`; `PYTHONNOUSERSITE=1`; `PYTHONPATH`; and each `dry-run-secrets` name set to `dryrungate-canary-<16 hex>`, fresh per run. Proxy variables and real credentials are absent, and lookups through `HOME` or `~` (for example `~/.netrc`) see an empty dir. On macOS, CoreFoundation adds `__CF_USER_TEXT_ENCODING` inside the child; it holds no secret.
+**Environment.** The child environment is built from scratch, not inherited. It holds only `PATH`, `LANG`, `LC_ALL` and `LC_CTYPE` copied from the parent when set; `HOME` and `TMPDIR` inside the per-run temp dir; `PYTHONDONTWRITEBYTECODE=1`; `PYTHONNOUSERSITE=1`; `PYTHONPATH`; and each `dry-run-secrets` name set to `dryrungate-canary-<16 hex>`, fresh per run. Proxy variables and real credentials are absent, and lookups through `HOME` or `~` (for example `~/.netrc`) see an empty dir. On macOS, CoreFoundation adds `__CF_USER_TEXT_ENCODING` inside the child; it holds no secret. Because the child runs in isolated mode (`-I`), the interpreter itself ignores every `PYTHON*` variable and the user site; the guard sets `sys.dont_write_bytecode = True` itself and reads `PYTHONPATH` from the environment to build the import path (below).
 
 Packages installed with `pip install --user` are not importable in the child. Install skill dependencies into the interpreter or a venv instead.
 
-**Import path.** `PYTHONPATH` is, in order: the skill dir, the skill dir's `scripts/` if it exists, the PATH argument the skill was found under, and that PATH's `scripts/` if it exists. In the child, `sys.path[0]` (which Python sets to the gate's own directory) is replaced with the skill dir, so a skill's own `tests/` package is never shadowed by the gate's.
+**Import path.** `PYTHONPATH` is, in order: the skill dir, the skill dir's `scripts/` if it exists, the PATH argument the skill was found under, and that PATH's `scripts/` if it exists. The child starts with none of these on `sys.path` and without the gate's own directory (`-I` adds no script dir), so nothing from the skill can run while the interpreter and the gate start up: a skill file named like a module they import, such as `scripts/secrets.py` or `site.py`, is never loaded in its place. The guard then sets `sys.dont_write_bytecode`, installs the audit hook and the `_posixsubprocess.fork_exec` wrapper, and only after that puts the `PYTHONPATH` entries at the front of `sys.path`, skill dir first, before running the target. A skill's own `tests/` package is therefore never shadowed by the gate's.
 
 **Hooked events** (from the [Python 3.9 audit events table](https://docs.python.org/3.9/library/audit_events.html)). Each blocked call writes one guard event, then raises `PermissionError`. Any guard event fails the run, even if the target caught the exception.
 

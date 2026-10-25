@@ -1407,7 +1407,8 @@ def _st36(tmp):
 
 def _st37(tmp):
     meta = (ST_META[0], ("dry-run", "scripts/send.sh")) + ST_META[2:]
-    st_path_skill(tmp, "shell-entry", meta=meta, files={"scripts/send.sh": "#!/bin/sh\necho 'DRY RUN' # --dry-run\n"})
+    # valid sh and valid Python with a "--dry-run" constant, so only the extension can fail S1
+    st_path_skill(tmp, "shell-entry", meta=meta, files={"scripts/send.sh": '#!/bin/sh\necho = "--dry-run"\n'})
     st_expect(st_gate(tmp), 1, [("S1", FAIL, ".py"), ("R1", SKIP), ("R2", SKIP)])
 
 

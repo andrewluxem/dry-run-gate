@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Selftest
+        run: python dry_run_gate.py --selftest
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Gate on the pass fixture (expect exit 0)
+        run: python dry_run_gate.py tests/fixtures/pass
+      - name: Gate on the fail fixture (expect exit 1 naming 192.0.2.1)
+        shell: bash
+        run: |
+          set +e
+          python dry_run_gate.py tests/fixtures/fail > fail-fixture.log 2>&1
+          code=$?
+          set -e
+          cat fail-fixture.log
+          if [ "$code" -ne 1 ]; then echo "expected exit 1, got $code"; exit 1; fi
+          grep -q '192\.0\.2\.1' fail-fixture.log || { echo "output does not name 192.0.2.1"; exit 1; }
+
+  action:
+    name: action (uses ./)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: ./
+        with:
+          args: "tests/fixtures/pass"

@@ -200,7 +200,7 @@ The test loads `ENTRY` by path, patches `socket.socket.connect`, `socket.create_
 ## Composite action
 
 ```yaml
-- uses: andrewluxem/dry-run-gate@<sha>
+- uses: andrewluxem/dry-run-gate@0a7061b8037eb0c3edebc0061fedfdc54d0996fd
   with:
     args: ". --strict"
 ```
@@ -211,7 +211,7 @@ The test loads `ENTRY` by path, patches `socket.socket.connect`, `socket.create_
 
 Two phases. **Phase 1** reports without blocking: the gate step has `continue-on-error: true`, so P0, P1 and any FAIL show in the log without turning the run red. After that repo's backfill (tags and dry-runs added to its skills), **Phase 2** removes `continue-on-error` and sets `args: ". --strict"`.
 
-Pin `actions/checkout` and `actions/setup-python` to the SHAs below (the ones dry-run-gate's own CI uses), and pin `andrewluxem/dry-run-gate` to the `main` commit SHA recorded when the repo was made public: `<not yet public>`.
+Pin `actions/checkout` and `actions/setup-python` to the SHAs below (the ones dry-run-gate's own CI uses), and pin `andrewluxem/dry-run-gate` to the `main` commit SHA recorded when the repo was made public: `0a7061b8037eb0c3edebc0061fedfdc54d0996fd`.
 
 The job timeout is 30 minutes. With the 30-second default, the worst case (2 x 30 s per tagged skill) reaches that limit at about 25 tagged skills plus install time; a repo with more raises `timeout-minutes`. A job-level timeout turns even a Phase 1 run red.
 
@@ -238,7 +238,7 @@ jobs:
           for f in requirements.txt skills/*/requirements.txt; do
             if [ -f "$f" ]; then python -m pip install -r "$f"; fi
           done
-      - uses: andrewluxem/dry-run-gate@<sha>
+      - uses: andrewluxem/dry-run-gate@0a7061b8037eb0c3edebc0061fedfdc54d0996fd
         continue-on-error: true    # Phase 1 only; remove in Phase 2
         with:
           args: "."

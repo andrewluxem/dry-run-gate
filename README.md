@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/banner.svg" alt="dry-run-gate: CI check that a skill's --dry-run makes no outbound connection, starts no process, leaks no secret" width="100%"></p>
+<p align="center"><img src="docs/banner.svg" alt="dry-run-gate: CI check that a skill's --dry-run makes no outbound connection, starts no process, leaks no secret"></p>
 
 # dry-run-gate
 

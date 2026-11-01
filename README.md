@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/banner.svg" alt="dry-run-gate: CI check that a skill's --dry-run makes no outbound connection, starts no process, leaks no secret" width="100%"></p>
+
 # dry-run-gate
 
 A skill that sends, posts, publishes, spends or deletes must prove in CI that its `--dry-run` makes no outbound connection, starts no process and leaks no secret. dry-run-gate is the check that enforces this. It targets careless dry-runs; it does not claim to stop a deliberately evasive one (see [Stated limits](#stated-limits)).

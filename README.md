@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.svg" alt="dry-run-gate: CI check that a skill's --dry-run makes no outbound connection, starts no process, leaks no secret"></p>
+
 # dry-run-gate
 
 A skill that sends, posts, publishes, spends or deletes must prove in CI that its `--dry-run` makes no outbound connection, starts no process and leaks no secret. dry-run-gate is the check that enforces this. It targets careless dry-runs; it does not claim to stop a deliberately evasive one (see [Stated limits](#stated-limits)).
@@ -10,12 +12,14 @@ When the spec behind this tool leaves something open, the gate fails closed: a c
 
 Run the gate against a fresh clone or copy of the skill repo, never your working checkout. A dry-run can change files that `git status` does not show (ignored files, or files outside the repo).
 
+From the root of this repo:
+
 ```
-git clone <skill repo> /tmp/gate-check && cd /tmp/gate-check
-python3 ~/Developer/repos/sites/_incoming/dry-run-gate/dry_run_gate.py .
+git clone <skill repo> /tmp/gate-check
+python3 dry_run_gate.py /tmp/gate-check
 ```
 
-`python3 dry_run_gate.py --list .` shows what the gate discovered without running anything. `python3 dry_run_gate.py --selftest` runs the 40 built-in cases.
+`python3 dry_run_gate.py --list /tmp/gate-check` shows what the gate discovered without running anything. `python3 dry_run_gate.py --selftest` runs the 40 built-in cases.
 
 ## Terms
 
